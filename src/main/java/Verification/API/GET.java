@@ -2,37 +2,47 @@ package Verification.API;
 
 import static spark.Spark.get;
 
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
-import Collection.Ticket;
-import Collection.Tickets;
+import TicketingEvent.Blockchain.NFT.Ticket;
+import Marketplace.Offer.Offers;
+import NFTCollections.NFT.NFT;
+import NFTCollections.NFT.NFTs;
 import org.json.JSONObject;
 
-import Collection.EventNFTCollection;
-import Collection.EventNFTCollections;
 import Main.Sha3;
 
 public class GET {
 
 	public static void run() {
 
+		get("/test", (request, response) -> {
+			JSONObject test1 = new JSONObject();
+			test1.put("test", "ok");
+			return test1;
+		});
+
 		// GET https://endpoint/ticketEntryMessage/?contractAddress=<string>&nftId=<int>
 		get("/ticketEntryMessage/", (request, response) -> {
 			try {
 				response.header("Content-Type", "application/json");
 
-				String contractAddress = request.queryParams("contractAddress");
+				String contractAddress = request.queryParams("contractAddress").toLowerCase();
 				Integer nftId = Integer.parseInt(request.queryParams("nftId"));
 
-				Ticket ticket = Tickets.getTicketByCollectionAddressAndNftId(contractAddress, nftId);
-				if(ticket == null) {
-					return getFail("message", "Invalid Contract Address Or Nft Id");
+				NFT n = NFTs.getNFTByCollectionAddressAndNftId(contractAddress, nftId);
+				if(n == null || !(n instanceof  Ticket)) return getFail("message", "Invalid Contract Address Or Nft Id");
+
+				Ticket ticket = (Ticket) n;
+
+				String randomHash = ticket.getRandomHash();
+				if(ticket.getRandomHash() == null) {
+					randomHash = Sha3.getRandomHash();
+					ticket.setRandomHash(randomHash);
 				}
 
-				String randomHash = Sha3.getRandomHash();
-				String message = "Check in to event " + contractAddress + " with nft " + nftId.toString() + " and random " + randomHash;
-				ticket.setRandomHash(randomHash);
+				String message = "Check in to event " + contractAddress + " with nft " + nftId + " and random " + randomHash;
+
+				Offers.removeAllOffersOfAnNft(contractAddress, nftId);
 
 				return getSuccess("message", message);
 			} catch (Exception e) {

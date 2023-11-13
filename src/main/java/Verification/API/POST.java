@@ -2,14 +2,20 @@ package Verification.API;
 
 import static spark.Spark.post;
 
-import Collection.Ticket;
-import Collection.Tickets;
+
+import TicketingEvent.Blockchain.NFT.Ticket;
+import Main.ByteArrayWrapper;
+import Main.Signature;
 import Marketplace.Offer.Offers;
+import NFTCollections.NFT.NFT;
+import NFTCollections.NFT.NFTs;
+import org.bouncycastle.util.encoders.Hex;
 import org.json.JSONObject;
 
-import Collection.EventNFTCollection;
-import Collection.EventNFTCollections;
-import Verification.SmartContract.SignatureVerification;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 
 public class POST {
 
@@ -20,31 +26,37 @@ public class POST {
 		//POST https://endpoint/verifyEntry/?contractAddress=<string>&nftId=<int>&signature
 		post("/verifyEntry/", (request, response) ->
 		{
-			response.header("Content-Type", "application/json");
-			String contractAddress = request.queryParams("contractAddress"); //Provided by the guards phone
-			Integer nftId = Integer.parseInt(request.queryParams("nftId")); //Provided from the users qr code
-			String signature = request.queryParams("signature"); //Provided from the users qr code
+			try {
+				response.header("Content-Type", "application/json");
+				String contractAddress = request.queryParams("contractAddress").toLowerCase(); //Provided by the guards phone
+				Integer nftId = Integer.parseInt(request.queryParams("nftId")); //Provided from the users qr code
+				String signature = request.queryParams("signature"); //Provided from the users qr code
 
-			Ticket ticket = Tickets.getTicketByCollectionAddressAndNftId(contractAddress, nftId);
-			if(ticket == null) {
-				return getFail("message", "Invalid Contract Address Or Nft Id");
-			}
-			if(ticket.getUsed()) {
-				return getFail("message", "This ticket has been used");
-			}
+				//NFT n = NFTs.getNFTByCollectionAddressAndNftId(contractAddress, nftId);
+				NFT n = NFTs.getNFTByCollectionAddressAndNftId(contractAddress, nftId);
+				if(n == null || !(n instanceof  Ticket)) return getFail("message", "Invalid Contract Address Or Nft Id");
 
-			String message = "Check in to event " + contractAddress + " with nft " + nftId.toString() + " and random " + ticket.getRandomHash();
+				Ticket ticket = (Ticket) n;
+				if (ticket.isUsed()) {
+					return getFail("message", "This ticket has been used");
+				}
 
-			String signer = SignatureVerification.getSigner(message, signature.substring(2));
+				String message = "Check in to event " + contractAddress + " with nft " + nftId + " and random " + ticket.getRandomHash();
 
-			if(signer.equalsIgnoreCase(ticket.getOwner())) {
-				//TODO Add the POST call to inform nasru's backend that this ticket is used
-				ticket.setUsed(true);
-				Offers.removeAllOffersOfAnNft(contractAddress, nftId);
-				return getSuccess("message", "Ticket Checked In");
-			}
-			else {
-				return getFail("message", "Invalid Signer");
+				ByteArrayWrapper signer = new ByteArrayWrapper(Hex.decode(Signature.recoverSigner(message, signature).substring(2)));
+
+				if (signer.equals(ticket.getOwner())) {
+					//TODO Add the POST call to inform nasru's backend that this ticket is used
+					ticket.setUsed(true);
+					Offers.removeAllOffersOfAnNft(contractAddress, nftId);
+					notifyServerOfTicketEntry(contractAddress, nftId);
+					return getSuccess("message", "Ticket Checked In");
+				} else {
+					return getFail("message", "Invalid Signer", "Agreement", message, "owner", "0x" + Hex.toHexString(ticket.getOwner().data()), "signer", "0x" + Hex.toHexString(signer.data()));
+				}
+			} catch (Exception e) {
+				e.printStackTrace();
+				return getError(e.getLocalizedMessage());
 			}
 
 		} );
@@ -99,6 +111,26 @@ public class POST {
 		return object;
 	}
 
-	
-	
+	public static void notifyServerOfTicketEntry(String contractAddress, int nftId) {
+		try {
+			String url = "http://13.200.97.144/v1/events/updateNftTicketState?auth_token=erer";
+
+			JSONObject body = new JSONObject();
+			body.put("contractAddress", contractAddress);
+			body.put("nftId", nftId);
+
+			HttpClient client = HttpClient.newHttpClient();
+			HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url))
+					.POST(HttpRequest.BodyPublishers.ofString(body.toString())).header("Content-Type", "application/json")
+					.build();
+
+			client.send(request, HttpResponse.BodyHandlers.ofString());
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+
+
+
+
 }

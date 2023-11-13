@@ -1,12 +1,14 @@
 package Wallet.Wallet;
 
 import java.math.BigInteger;
-import java.util.Arrays;
 
+import Main.OWeb3j;
 import Main.Signature;
 import Marketplace.Offer.Offer;
+import Marketplace.Offer.Offers;
+import NFTCollections.NFT.NFTs;
+import TicmintToken.Token.TMT;
 import org.bouncycastle.util.encoders.Hex;
-import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.datatypes.*;
 import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.crypto.Credentials;
@@ -14,7 +16,6 @@ import org.web3j.crypto.ECKeyPair;
 import org.web3j.crypto.Keys;
 import org.web3j.crypto.Sign;
 import org.web3j.protocol.Web3j;
-import org.web3j.protocol.core.methods.request.Transaction;
 import org.web3j.protocol.core.methods.response.EthSendTransaction;
 import org.web3j.tx.RawTransactionManager;
 import org.web3j.tx.TransactionManager;
@@ -33,7 +34,7 @@ public class Wallet extends DBM {
 	
 	//Used for creating and loading
 	public Wallet(String email) throws Exception {
-		super(email);
+		super(email, true, true);
 		
 		String address = loadString("address");
 		if(address == null) {
@@ -44,6 +45,7 @@ public class Wallet extends DBM {
 			byte[] key = AES256.encrypt(ecKeyPair.getPrivateKey().toByteArray(), address + Settings.haha);
 			
 			store("key", key);
+			store("address", address);
 		}
 		
 		this.address = address;
@@ -52,15 +54,32 @@ public class Wallet extends DBM {
 	
 	//Setters==============================================================================================================
 
-	public byte[] signMessage(String message) {
-
-		// make sure the message is in the correct format
-		String prefix = "\u0019Ethereum Signed Message:\n" + message.length();
-		String messageHash = prefix+message;
+	public byte[] personalSignMessage(String message) {
 
 		try {
 			// sign the message
-			Sign.SignatureData signatureData = Sign.signMessage(messageHash.getBytes(), getKeyPair());
+			Sign.SignatureData signatureData = Sign.signPrefixedMessage(message.getBytes(), getKeyPair());
+
+			// Combine the R, S, and V components of the signature into one byte array
+			byte[] signature = new byte[65];  // 32 bytes for R, 32 bytes for S, 1 byte for V
+
+			System.arraycopy(signatureData.getR(), 0, signature, 0, 32);
+			System.arraycopy(signatureData.getS(), 0, signature, 32, 32);
+			signature[64] = signatureData.getV()[0];
+
+			System.out.println("Signature: " + Hex.toHexString(signature));
+			return signature;
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return null;
+	}
+
+	public byte[] signMessage(String message) {
+
+		try {
+			// sign the message
+			Sign.SignatureData signatureData = Sign.signMessage(message.getBytes(), getKeyPair());
 
 			// Combine the R, S, and V components of the signature into one byte array
 			byte[] signature = new byte[65];  // 32 bytes for R, 32 bytes for S, 1 byte for V
@@ -90,187 +109,47 @@ public class Wallet extends DBM {
 
 	// takeBuyOffer(address nftContract , uint256 nftId, address crypto, uint256 amount, uint256 deadline, bytes calldata signature)
 	public Response takeBuyOffer(Offer offer) throws Exception {
-		RawTransactionManager manager = new RawTransactionManager(Settings.web3j, Credentials.create(getKeyPair()), Settings.chainId);
-		List<Type> inputParameters = new ArrayList<>();
-		inputParameters.add(new Address(offer.collectionAddress));
-		inputParameters.add(new Uint256(offer.nftId));
-		inputParameters.add(new Address(offer.tokenAddress));
-		inputParameters.add(new Uint256(offer.tokenAmount));
-		inputParameters.add(new Uint256(offer.deadline));
-		inputParameters.add(new DynamicBytes(offer.offerorsSignature));
-
-		Function function = new Function(
-				"takeBuyOffer",  // function we're calling
-				inputParameters,   // Parameters to pass as Solidity Types
-				Arrays.asList());
-		String encodedFunction = FunctionEncoder.encode(function);
-
-		BigInteger gas = getBuyOfferGasEstimate(offer);
-		BigInteger gasPrice = Settings.getGasPrice();
-		BigInteger ETHGasFees = gas.multiply(gasPrice);
-		if(MotherWallet.transferETH(address, ETHGasFees)) {
-			EthSendTransaction tr = manager.sendTransaction(gasPrice, gas, Settings.marketplaceAddress, encodedFunction, BigInteger.valueOf(0));
-
-			if(tr.getError() != null) {
-				return Response.failure(tr.getError().toString());
-			}
-			else {
-				return Response.success(tr.getTransactionHash());
-			}
-		}
-		else {
-			return Response.failure("Failed to transfer ETH to wallet");
+		if(!NFTs.getNFTByCollectionAddressAndNftId(offer.collectionAddress, offer.nftId).getHexOwner().equalsIgnoreCase(address)) {
+			return Response.failure("You're Not Owner Of The NFT");
 		}
 
+		return OWeb3j.fuelAndSendScTxn(Settings.web3j, getCredentials(), Settings.chainId, address, Settings.marketplaceAddress, Settings.getGasPrice(), BigInteger.ZERO, "takeBuyOffer", new Address(offer.collectionAddress), new Uint256(offer.nftId), new Address(address), new Uint256(offer.tokenAmount), new Uint256(offer.deadline), new DynamicBytes(offer.offerorsSignature));
 	}
 
 	public Response takeSellOffer(Offer offer) throws Exception {
-		RawTransactionManager manager = new RawTransactionManager(Settings.web3j, Credentials.create(getKeyPair()), Settings.chainId);
-		List<Type> inputParameters = new ArrayList<>();
-		inputParameters.add(new Address(offer.collectionAddress));
-		inputParameters.add(new Uint256(offer.nftId));
-		inputParameters.add(new Address(offer.tokenAddress));
-		inputParameters.add(new Uint256(offer.tokenAmount));
-		inputParameters.add(new Uint256(offer.deadline));
-		inputParameters.add(new DynamicBytes(offer.offerorsSignature));
-
-		Function function = new Function(
-				"takeSellOffer",  // function we're calling
-				inputParameters,   // Parameters to pass as Solidity Types
-				Arrays.asList());
-		String encodedFunction = FunctionEncoder.encode(function);
-
-		BigInteger gas = getSellOfferGasEstimate(offer);
-		BigInteger gasPrice = Settings.getGasPrice();
-		BigInteger ETHGasFees = gas.multiply(gasPrice);
-		if(MotherWallet.transferETH(address, ETHGasFees)) {
-			EthSendTransaction tr = manager.sendTransaction(gasPrice, gas, Settings.marketplaceAddress, encodedFunction, BigInteger.valueOf(0));
-
-			if(tr.getError() != null) {
-				return Response.failure(tr.getError().toString());
-			}
-			else {
-				return Response.success(tr.getTransactionHash());
-			}
-		}
-		else {
-			return Response.failure("Failed to transfer ETH to wallet");
+		if(Settings.tmt.getUserBalance(address).compareTo(offer.tokenAmount) == -1) {
+			return Response.failure("Insufficient TMT Balance");
 		}
 
+		return OWeb3j.fuelAndSendScTxn(Settings.web3j, getCredentials(), Settings.chainId, address, Settings.marketplaceAddress, Settings.getGasPrice(), BigInteger.ZERO, "takeSellOffer", new Address(offer.collectionAddress), new Uint256(offer.nftId), new Uint256(offer.tokenAmount), new Uint256(offer.deadline), new DynamicBytes(offer.offerorsSignature));
 	}
 
-	public Response transferERC20(Web3j web3j, long chainId, String token, String to, BigInteger amount, BigInteger gas, BigInteger gasPrice) throws Exception {
-		RawTransactionManager manager = new RawTransactionManager(web3j, Credentials.create(getKeyPair()), chainId);
-		
-		Function function = new Function(
-	            "transfer",  // function we're calling
-	            Arrays.asList(new Address(to), new Uint256(amount)),   // Parameters to pass as Solidity Types
-	            Arrays.asList());
-	    String encodedFunction = FunctionEncoder.encode(function);
-		
-	    EthSendTransaction tr = manager.sendTransaction(gasPrice, gas, token, encodedFunction, BigInteger.valueOf(0));
-	    
-	    if(tr.getError() != null) {
-	    	return Response.failure(tr.getError().toString());
+	//buy string[] calldata ticketTypes, uint256[] calldata amounts, string[] calldata _seatNumbers
+	//public static Response sendScTxn(Web3j web3j, Credentials cr, long chainId, String contractAddress, BigInteger gasPrice, BigInteger value, String functionName, Object... inputParams)
+	public Response buyTickets(String collectionContract, List<String> tikcetType, List<BigInteger> amount, List<String> seatNumber) throws Exception {
+		List<Utf8String> ticketTypeUtf8String = new ArrayList<>();
+		List<Uint256> amountUint256 = new ArrayList<>();
+		List<Utf8String> seatNumberUtf8String = new ArrayList<>();
+
+		for(String s: tikcetType) {
+			ticketTypeUtf8String.add(new Utf8String(s));
 		}
 
-	    return Response.success(tr.getTransactionHash());
-	}
-	
-	public Response transferNFT(Web3j web3j, long chainId, String tokenAddress, String to, BigInteger tokenId, BigInteger gas, BigInteger gasPrice) throws Exception {
-	    RawTransactionManager manager = new RawTransactionManager(web3j, Credentials.create(getKeyPair()), chainId);
+		for(BigInteger i: amount) {
+			amountUint256.add(new Uint256(i));
+		}
 
-	    Function function = new Function(
-	        "safeTransferFrom",
-	        Arrays.asList(new Address(address), new Address(to), new Uint256(tokenId)),
-	        Arrays.asList()
-	    );
-	    String encodedFunction = FunctionEncoder.encode(function);
+		for(String s: seatNumber) {
+			seatNumberUtf8String.add(new Utf8String(s));
+		}
 
-	    EthSendTransaction tr = manager.sendTransaction(gasPrice, gas, tokenAddress, encodedFunction, BigInteger.valueOf(0));
-	    if(tr.getError() != null) {
-	        return Response.failure(tr.getError().getMessage());
-	    }
-
-	    return Response.success(tr.getTransactionHash());
-	}
-	
-	//Getters=======================================================================================================================
-	public BigInteger getERC20TransferGasEstimate(Web3j web3j, long chainId, String token, String to, BigInteger amount) throws Exception {
-	    RawTransactionManager manager = new RawTransactionManager(web3j, Credentials.create(getKeyPair()), chainId);
-	    
-	    Function function = new Function(
-	            "transfer",
-	            Arrays.asList(new Address(to), new Uint256(amount)),
-	            Arrays.asList());
-	    String encodedFunction = FunctionEncoder.encode(function);
-
-	    return web3j.ethEstimateGas(
-	            Transaction.createEthCallTransaction(manager.getFromAddress(), token, encodedFunction))
-	            .send()
-	            .getAmountUsed();
+		return OWeb3j.fuelAndSendScTxn(Settings.web3j, getCredentials(), Settings.chainId, address, collectionContract, Settings.getGasPrice(), BigInteger.ZERO, "buy", new Address(address), new DynamicArray(ticketTypeUtf8String), new DynamicArray(amountUint256), new DynamicArray(seatNumberUtf8String));
 	}
 
-	public BigInteger getNFTTransferGasEstimate(Web3j web3j, long chainId, String tokenAddress, String to, BigInteger tokenId) throws Exception {
-	    RawTransactionManager manager = new RawTransactionManager(web3j, Credentials.create(getKeyPair()), chainId);
-
-	    Function function = new Function(
-	        "safeTransferFrom",
-	        Arrays.asList(new Address(manager.getFromAddress()), new Address(to), new Uint256(tokenId)),
-	        Arrays.asList()
-	    );
-	    String encodedFunction = FunctionEncoder.encode(function);
-
-	    return web3j.ethEstimateGas(
-	            Transaction.createEthCallTransaction(manager.getFromAddress(), tokenAddress, encodedFunction))
-	            .send()
-	            .getAmountUsed();
+	//buy(address to, uint256 amount)
+	public Response buyMerchandise(String merchandiseContract, int amount) throws Exception {
+		return OWeb3j.fuelAndSendScTxn(Settings.web3j, getCredentials(), Settings.chainId, address, merchandiseContract, Settings.getGasPrice(), BigInteger.ZERO, "buy", new Address(address), new Uint256(amount));
 	}
-
-	public BigInteger getBuyOfferGasEstimate(Offer offer) throws Exception {
-		RawTransactionManager manager = new RawTransactionManager(Settings.web3j, Credentials.create(getKeyPair()), Settings.chainId);
-		List<Type> inputParameters = new ArrayList<>();
-		inputParameters.add(new Address(offer.collectionAddress));
-		inputParameters.add(new Uint256(offer.nftId));
-		inputParameters.add(new Address(offer.tokenAddress));
-		inputParameters.add(new Uint256(offer.tokenAmount));
-		inputParameters.add(new Uint256(offer.deadline));
-		inputParameters.add(new DynamicBytes(offer.offerorsSignature));
-
-		Function function = new Function(
-				"takeBuyOffer",  // function we're calling
-				inputParameters,   // Parameters to pass as Solidity Types
-				Arrays.asList());
-		String encodedFunction = FunctionEncoder.encode(function);
-
-		return Settings.web3j.ethEstimateGas(
-				Transaction.createEthCallTransaction(manager.getFromAddress(), Settings.marketplaceAddress, encodedFunction))
-				.send()
-				.getAmountUsed();
-	}
-
-	public BigInteger getSellOfferGasEstimate(Offer offer) throws Exception {
-		RawTransactionManager manager = new RawTransactionManager(Settings.web3j, Credentials.create(getKeyPair()), Settings.chainId);
-		List<Type> inputParameters = new ArrayList<>();
-		inputParameters.add(new Address(offer.collectionAddress));
-		inputParameters.add(new Uint256(offer.nftId));
-		inputParameters.add(new Address(offer.tokenAddress));
-		inputParameters.add(new Uint256(offer.tokenAmount));
-		inputParameters.add(new Uint256(offer.deadline));
-		inputParameters.add(new DynamicBytes(offer.offerorsSignature));
-
-		Function function = new Function(
-				"takeSellOffer",  // function we're calling
-				inputParameters,   // Parameters to pass as Solidity Types
-				Arrays.asList());
-		String encodedFunction = FunctionEncoder.encode(function);
-
-		return Settings.web3j.ethEstimateGas(
-						Transaction.createEthCallTransaction(manager.getFromAddress(), Settings.marketplaceAddress, encodedFunction))
-				.send()
-				.getAmountUsed();
-	}
-
 
 	//Internal Functions============================================================================================================
 	
@@ -280,4 +159,9 @@ public class Wallet extends DBM {
 		
 		return ECKeyPair.create(new BigInteger(key));
 	}
+
+	public Credentials getCredentials() throws Exception {
+		return Credentials.create(getKeyPair());
+	}
+
 }
