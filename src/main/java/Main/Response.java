@@ -12,7 +12,7 @@ public class Response {
 	
 	@Override
 	public String toString() {
-		return "{seccuess: " + success + ", " + message + "}";
+		return "{success: " + success + ", " + message + "}";
 	}
 	
 	public static Response success(String message) {

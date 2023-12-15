@@ -19,5 +19,7 @@ public class Initializer {
         GET.run();
         POST.run();
         DELETE.run();
+
+        Marketplace.Webhook.POST.run();
     }
 }

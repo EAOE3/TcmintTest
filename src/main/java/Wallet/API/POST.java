@@ -2,16 +2,19 @@ package Wallet.API;
 
 import static spark.Spark.post;
 
-import Collection.Ticket;
-import Collection.Tickets;
+
+import TicketingEvent.Blockchain.TicketType.TicketTypes;
+import Main.Response;
+import TicmintToken.Token.TMT;
 import Wallet.Wallet.Wallets;
 import Wallet.Wallet.Wallet;
 import org.bouncycastle.util.encoders.Hex;
 import org.json.JSONObject;
 
-import Collection.EventNFTCollection;
-import Collection.EventNFTCollections;
-import Verification.SmartContract.SignatureVerification;
+
+import java.math.BigInteger;
+import java.util.LinkedList;
+import java.util.List;
 
 public class POST {
 
@@ -20,19 +23,99 @@ public class POST {
 
         post("/signMessage/", (request, response) ->
         {
-            response.header("Content-Type", "application/json");
-            String message = request.queryParams("message");
-            String usersAddress = request.queryParams("usersAddress");
-            String verificationToken = request.queryParams("verificationToken");
+            try {
+                response.header("Content-Type", "application/json");
+                String message = request.queryParams("message");
+                String usersAddress = request.queryParams("usersAddress").toLowerCase();
+                String verificationToken = request.queryParams("verificationToken");
 
-            //TODO verify verification token
+                //TODO verify verification token
 
-            Wallet w = Wallets.getWalletByAddress(usersAddress);
-            if(w == null) return getFail("message", "Invalid User");
+                Wallet w = Wallets.getWalletByAddress(usersAddress);
+                if (w == null) return getFail("message", "Invalid User");
 
-            byte[] signature = w.signMessage(message);
+                byte[] signature = w.signMessage(message);
 
-            return getSuccess("signature", Hex.toHexString(signature));
+                return getSuccess("signature", Hex.toHexString(signature));
+            } catch (Exception e) {
+                return getError(e.getMessage());
+            }
+        } );
+
+        post("/personalSignMessage/", (request, response) ->
+        {
+            try {
+                response.header("Content-Type", "application/json");
+                String message = request.queryParams("message");
+                String usersAddress = request.queryParams("usersAddress").toLowerCase();
+                String verificationToken = request.queryParams("verificationToken");
+
+                //TODO verify verification token
+
+                Wallet w = Wallets.getWalletByAddress(usersAddress);
+                if (w == null) return getFail("message", "Invalid User");
+
+                byte[] signature = w.personalSignMessage(message);
+
+                return getSuccess("signature", Hex.toHexString(signature));
+            } catch (Exception e) {
+                return getError(e.getMessage());
+            }
+        } );
+
+        //TODO testing
+        post("/buyTickets/", (request, response) ->
+        {
+            try {
+                response.header("Content-Type", "application/json");
+                JSONObject data = new JSONObject(request.body());
+
+                String usersAddress = data.getString("usersAddress").toLowerCase();
+                String verificationToken = data.getString("verificationToken");
+                String collectionAddress = data.getString("collectionAddress").toLowerCase();
+                List<String> ticketTypes = new LinkedList<>();
+                List<BigInteger> amount = new LinkedList<>();
+                List<String> seatNumber = new LinkedList<>();
+
+                for(Object o: data.getJSONArray("ticketTypes")) {
+                    ticketTypes.add(o.toString());
+                }
+
+                for(Object o: data.getJSONArray("amount")) {
+                    amount.add(BigInteger.valueOf((Integer) o));
+                }
+
+                for(Object o: data.getJSONArray("seatNumber")) {
+                    seatNumber.add(o.toString());
+                }
+
+                //TODO verify verification token
+
+                Wallet w = Wallets.getWalletByAddress(usersAddress);
+                if (w == null) return getFail("message", "Invalid User");
+
+                BigInteger totalPrice = BigInteger.valueOf(0);
+                for(int t=0; t < ticketTypes.size(); ++t) {
+                    String ticketType = ticketTypes.get(t);
+                    BigInteger amountOfTickets = amount.get(t);
+
+                    totalPrice = totalPrice.add(TicketTypes.getTicketTypeByCollectionAddressAndTicketTypeId(collectionAddress, ticketType).getPrice().multiply(amountOfTickets));
+                }
+
+                if(TMT.getUserBalance(usersAddress).compareTo(totalPrice) < 0) {
+                    return getFail("message", "Insufficient Balance");
+                }
+
+                Response r = w.buyTickets(collectionAddress, ticketTypes, amount, seatNumber);
+
+                if(r.success) {
+                    return getSuccess("transactionHash", r.message);
+                } else {
+                    return getFail("message", r.message);
+                }
+            } catch (Exception e) {
+                return getError(e.getMessage());
+            }
         } );
 
     }

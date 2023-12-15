@@ -5,23 +5,42 @@ import java.lang.reflect.Constructor;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.util.*;
 
+import Database.Webhook.Sender;
 import Main.Settings;
 
 import java.nio.ByteOrder;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.attribute.BasicFileAttributes;
 
 public class DBM {
 
     public final String id;
     public final String rootPath;
     private final String rootEncryptionKey;
+    private final boolean encrypt;
+    private final boolean backup;
 
     // If a class doesn't want a superName, it uses this constructor
-    public DBM(String id) {
+    public DBM(String id, boolean encrypt, boolean backup) {
         this.id = id;
+        this.encrypt = encrypt;
+        this.backup = backup;
+
         rootPath = "database/" + this.getClass().getSimpleName() + "/" + id + "/";
-        rootEncryptionKey = id + "/" + this.getClass().getSimpleName() + Settings.haha;
+
+        if(encrypt) {
+            rootEncryptionKey = id + "/" + this.getClass().getSimpleName() + Settings.haha;
+        } else {
+            rootEncryptionKey = null;
+        }
     }
 
     public boolean store(String valueName, Object value) {
@@ -40,19 +59,29 @@ public class DBM {
 
     public boolean store(String valueName, byte[] value) {
         String path = rootPath + valueName;
-        String encryptionKey = rootEncryptionKey + valueName;
+
+        File file = new File(path);
+        file.getParentFile().mkdirs();
 
         try {
-            byte[] encryptedData = AES256.encrypt(value, encryptionKey);
-            FM.write(path, encryptedData);
+            if (encrypt) {
+                String encryptionKey = rootEncryptionKey + valueName;
+                value = AES256.encrypt(value, encryptionKey);
+            }
+
+            Files.write(file.toPath(), value); // using Files.write for simplicity
+
+            if(backup) {
+                Sender.backupBytes(path, value);
+            }
+
+            return true;
         } catch (Exception e) {
             e.printStackTrace();
             return false;
         }
-
-        return true;
     }
-    
+
     public boolean store(String valueName, String value) {
     	if(value == null) return true;
         return store(valueName, value.getBytes());
@@ -70,15 +99,20 @@ public class DBM {
 
     public byte[] load(String valueName) {
         String path = rootPath + valueName;
-        String encryptionKey = rootEncryptionKey + valueName;
+        File file = new File(path);
+        if(!file.exists()) return null;
 
         try {
-            byte[] encryptedData = FM.readBytes(path);
-            byte[] decryptedData = AES256.decrypt(encryptedData, encryptionKey);
+            byte[] data = readByteArrayFromFile(file.toPath());
+            if(data == null) return null;
 
-            return decryptedData;
+            if(encrypt) {
+                String encryptionKey = rootEncryptionKey + valueName;
+                data = AES256.decrypt(data, encryptionKey);
+            }
+
+            return data;
         } catch (Exception e) {
-           // e.printStackTrace();
             return null;
         }
     }
@@ -159,7 +193,15 @@ public class DBM {
     // Returns creation time of the folder holding the data of this class/The
     // creation time of the class
     public long getCreationTime() {
-        return FM.getCreationTime(rootPath);
+        Path path = Paths.get(rootPath);
+
+        try {
+            BasicFileAttributes attrs = Files.readAttributes(path, BasicFileAttributes.class);
+            return attrs.creationTime().toInstant().getEpochSecond();
+        } catch (IOException e) {
+            e.printStackTrace();
+            return 0;
+        }
     }
 
     public void delete(String valueName) {
@@ -255,6 +297,15 @@ public class DBM {
             return buffer.getDouble();
         } else {
             throw new IllegalArgumentException("Invalid byte array length: " + byteArray.length);
+        }
+    }
+
+    public static byte[] readByteArrayFromFile(Path filePath) {
+        try {
+            return Files.readAllBytes(filePath);
+        } catch (IOException e) {
+            e.printStackTrace();
+            return null;
         }
     }
 

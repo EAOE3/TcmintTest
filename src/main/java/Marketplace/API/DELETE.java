@@ -2,23 +2,9 @@ package Marketplace.API;
 
 import static spark.Spark.delete;
 
-import Collection.Ticket;
-import Collection.Tickets;
-import Main.Response;
-import Main.Signature;
 import Marketplace.Offer.Offer;
 import Marketplace.Offer.Offers;
-import Wallet.Wallet.Wallets;
-import Wallet.Wallet.Wallet;
-import org.bouncycastle.util.encoders.Hex;
 import org.json.JSONObject;
-
-import Collection.EventNFTCollection;
-import Collection.EventNFTCollections;
-import Verification.SmartContract.SignatureVerification;
-import org.web3j.crypto.Sign;
-
-import java.math.BigInteger;
 
 public class DELETE {
 
@@ -28,7 +14,7 @@ public class DELETE {
         delete("/offer", (request, response) -> {
             try {
                 // Extract the parameters from the request
-                String offerId = request.queryParams("offerId");
+                String offerId = request.queryParams("offerId").toLowerCase();
                 String verificationToken = request.queryParams("verificationToken");
 
                 //TODO: check the verification token
