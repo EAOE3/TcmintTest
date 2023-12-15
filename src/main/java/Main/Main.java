@@ -102,6 +102,10 @@ public class Main {
 
 
     public static void main(String[] args) throws Exception {
+        Settings.initGasPriceUpdate();
+        Thread.sleep(10000);
+        System.out.println(Settings.getGasPrice());
+        System.exit(0);
 //        SDBM.store("yuirtekhjvbc", "ticmintarelolmyswimfudgenokacoyes");
 //        System.exit(0);
 //        Response r1 = OWeb3j.sendScTxn(Settings.web3j, Settings.getMotherWalletCredentials(), Settings.chainId, Settings.eventManagementContractAddress, Settings.getGasPrice(), BigInteger.ZERO, "initialize", new Address(Settings.ticmintFeeAccount), new Address(Settings.ticmintTokenAddress));

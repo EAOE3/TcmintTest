@@ -12,7 +12,7 @@ import java.math.BigInteger;
 
 public class Settings {
 
-	public final static Web3j web3j = Web3j.build(new HttpService("https://rpc-mumbai.maticvigil.com/"));
+	public final static Web3j web3j = Web3j.build(new HttpService("https://mainnet.infura.io/v3/"));
 	public static final String web2BackendUrl = "";
 	public static final long chainId = 80001;
 	public static final long blockTime = 2000;
